@@ -46,7 +46,7 @@ class CommandLineParser():
     SSLYZE_USAGE = 'usage: %prog [options] target1.com target2.com:443 etc...'
 
     # StartTLS options
-    START_TLS_PROTS = ['smtp', 'xmpp', 'pop3', 'ftp', 'imap', 'ldap', 'rdp', 'postgres', 'auto']
+    START_TLS_PROTS = ['smtp', 'xmpp', 'xmpp_server', 'pop3', 'ftp', 'imap', 'ldap', 'rdp', 'postgres', 'auto']
     START_TLS_USAGE = 'STARTTLS should be one of: ' + str(START_TLS_PROTS) +  \
         '. The \'auto\' option will cause SSLyze to deduce the protocol' + \
         ' (ftp, imap, etc.) from the supplied port number, for each target servers.'
@@ -238,6 +238,16 @@ class CommandLineParser():
             dest='sni',
             default=None)
 
+        # No text output
+        self._parser.add_option(
+            '--quiet',
+            action="store_true",
+            dest='quiet',
+            help=(
+                'Hide script standard outputs.'
+                ' Will only affect script output if --xml_out is set.'))
+
+
     def _add_plugin_options(self, available_plugins):
         """
         Recovers the list of command line options implemented by the available
@@ -261,13 +271,16 @@ class CommandLineParser():
 
 
     def _process_parsing_results(self, args_command_list):
-        """
-        Performs various sanity checks on the command line that was used to
-        launch SSLyze.
+        """Performs various sanity checks on the command line that was used to launch SSLyze.
         Returns the shared_settings object to be fed to plugins.
         """
 
         shared_settings = {}
+
+        # Prevent --quiet without --xml_out
+        if not args_command_list.xml_file and args_command_list.quiet:
+                raise CommandLineParsingError('Cannot use --quiet without --xml_out.')
+
         # Sanity checks on the client cert options
         if bool(args_command_list.cert) ^ bool(args_command_list.key):
             raise CommandLineParsingError('No private key or certificate file were given. See --cert and --key.')

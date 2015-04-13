@@ -54,7 +54,8 @@ def create_sslyze_connection(target, shared_settings, sslVersion=None, sslVerify
                           25 :      SMTPConnection,
                           'xmpp':   XMPPConnection,
                           5222 :    XMPPConnection,
-                          5269 :    XMPPConnection,
+                          'xmpp_server': XMPPServerConnection,
+                          5269 :         XMPPServerConnection,
                           'pop3' :  POP3Connection,
                           109 :     POP3Connection,
                           110 :     POP3Connection,
@@ -85,7 +86,7 @@ def create_sslyze_connection(target, shared_settings, sslVersion=None, sslVerify
                 connectionClass = SSLConnection
 
         # XMPP configuration
-        if connectionClass == XMPPConnection:
+        if connectionClass in [XMPPConnection, XMPPServerConnection]:
             sslConn = connectionClass(target, sslVerifyLocations, timeout,
                                       shared_settings['nb_retries'],
                                       shared_settings['xmpp_to'])
@@ -298,7 +299,7 @@ class HTTPSConnection(SSLConnection):
         try: # Send an HTTP GET to the server and store the HTTP Status Code
             self.write(self.HTTP_GET_REQ.format(self._host))
             # Parse the response and print the Location header
-            httpResp = parse_http_response(self.read(2048))
+            httpResp = parse_http_response(self)
             if httpResp.version == 9 :
                 # HTTP 0.9 => Probably not an HTTP response
                 result = self.ERR_NOT_HTTP
@@ -358,7 +359,7 @@ class SSLTunnelConnection(SSLConnection):
         else:
             self._sock.send(self.HTTP_CONNECT_REQ_PROXY_AUTH_BASIC.format(self._host, self._port,
                                         self._tunnelBasicAuth))
-        httpResp = parse_http_response(self._sock.recv(2048))
+        httpResp = parse_http_response(self._sock)
 
         # Check if the proxy was able to connect to the host
         if httpResp.status != 200:
@@ -462,6 +463,11 @@ class XMPPConnection(SSLConnection):
             raise StartTLSError(self.ERR_XMPP_NO_STARTTLS)
 
 
+class XMPPServerConnection(XMPPConnection):
+    XMPP_OPEN_STREAM = ("<stream:stream xmlns='jabber:server' xmlns:stream='"
+        "http://etherx.jabber.org/streams' xmlns:tls='http://www.ietf.org/rfc/"
+        "rfc2595.txt' to='{0}' xml:lang='en' version='1.0'>" )
+
 
 class LDAPConnection(SSLConnection):
     """SSL connection class that performs an LDAP StartTLS negotiation
@@ -470,7 +476,9 @@ class LDAPConnection(SSLConnection):
     ERR_NO_STARTTLS = 'LDAP AUTH TLS was rejected'
 
     START_TLS_CMD = bytearray(b'0\x1d\x02\x01\x01w\x18\x80\x161.3.6.1.4.1.1466.20037')
-    START_TLS_OK = 'Start TLS request accepted.'
+    START_TLS_OK = '\x30\x0c\x02\x01\x01\x78\x07\x0a\x01\x00\x04\x00\x04'
+    START_TLS_OK2 = 'Start TLS request accepted'
+    START_TLS_OK_APACHEDS = '\x30\x26\x02\x01\x01\x78\x21\x0a\x01\x00\x04\x00\x04\x00\x8a\x16\x31\x2e\x33\x2e\x36\x2e\x31\x2e\x34\x2e\x31\x2e\x31\x34\x36\x36\x2e\x32\x30\x30\x33\x37\x8b\x00'
 
 
     def do_pre_handshake(self):
@@ -482,8 +490,9 @@ class LDAPConnection(SSLConnection):
 
         # Send Start TLS
         self._sock.send(self.START_TLS_CMD)
-        if self.START_TLS_OK  not in self._sock.recv(2048):
-            raise StartTLSError(self.ERR_NO_STARTTLS)
+        data = self._sock.recv(2048)
+        if self.START_TLS_OK not in data and self.START_TLS_OK_APACHEDS not in data and self.START_TLS_OK2 not in data:
+            raise StartTLSError(self.ERR_NO_STARTTLS + ', returned: "' + data + '" (hex: "' + data.encode('hex') + '")')
 
 
 class PGConnection(SSLConnection):

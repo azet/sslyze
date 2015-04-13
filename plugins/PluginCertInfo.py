@@ -23,7 +23,8 @@
 #   along with SSLyze.  If not, see <http://www.gnu.org/licenses/>.
 #-------------------------------------------------------------------------------
 
-from os.path import join, dirname, realpath
+from os.path import join, dirname, realpath, abspath
+import inspect
 import imp
 from xml.etree.ElementTree import Element
 import sys
@@ -35,21 +36,34 @@ from nassl import X509_NAME_MISMATCH, X509_NAME_MATCHES_SAN, X509_NAME_MATCHES_C
 from nassl.SslClient import ClientCertificateRequested
 
 
-TRUST_STORES_PATH = join(realpath(dirname(sys.argv[0])), 'plugins', 'data', 'trust_stores')
+# Getting the path to the trust stores is trickier than it sounds due to subtle differences on OS X, Linux and Windows
+def get_script_dir(follow_symlinks=True):
+    if getattr(sys, 'frozen', False): # py2exe, PyInstaller, cx_Freeze
+        path = abspath(sys.executable)
+    else:
+        path = inspect.getabsfile(get_script_dir)
+    if follow_symlinks:
+        path = realpath(path)
+    return dirname(path)
+
+
+TRUST_STORES_PATH = join(get_script_dir(), 'data', 'trust_stores')
 
 # We use the Mozilla store for additional things: OCSP and EV validation
 MOZILLA_STORE_PATH = join(TRUST_STORES_PATH, 'mozilla.pem')
 
 AVAILABLE_TRUST_STORES = {
-    MOZILLA_STORE_PATH: ('Mozilla NSS', '08/2014'),
-    join(TRUST_STORES_PATH, 'microsoft.pem'): ('Microsoft', '08/2014'),
-    join(TRUST_STORES_PATH, 'apple.pem'): ('Apple', 'OS X 10.9.4'),
+    MOZILLA_STORE_PATH: ('Mozilla NSS', '04/2015'),
+    join(TRUST_STORES_PATH, 'microsoft.pem'): ('Microsoft', '04/2015'),
+    join(TRUST_STORES_PATH, 'apple.pem'): ('Apple', 'OS X 10.10.3'),
     join(TRUST_STORES_PATH, 'java.pem'): ('Java 6', 'Update 65')
 }
 
 
 # Import Mozilla EV OIDs
-MOZILLA_EV_OIDS = imp.load_source('mozilla_ev_oids', join(TRUST_STORES_PATH, 'mozilla_ev_oids.py')).MOZILLA_EV_OIDS
+# Generated using extract_mozilla_ev_oids.py
+MOZILLA_EV_OIDS = ['2.16.840.1.114171.500.9', '1.2.392.200091.100.721.1', '1.3.6.1.4.1.6334.1.100.1', '2.16.756.1.89.1.2.1.1', '1.3.6.1.4.1.23223.2', '2.16.840.1.113733.1.7.23.6', '1.3.6.1.4.1.14370.1.6', '2.16.840.1.113733.1.7.48.1', '2.16.840.1.114404.1.1.2.4.1', '2.16.840.1.114404.1.1.2.4.1', '2.16.840.1.114404.1.1.2.4.1', '1.3.6.1.4.1.6449.1.2.1.5.1', '1.3.6.1.4.1.6449.1.2.1.5.1', '1.3.6.1.4.1.6449.1.2.1.5.1', '1.3.6.1.4.1.6449.1.2.1.5.1', '1.3.6.1.4.1.6449.1.2.1.5.1', '2.16.840.1.114413.1.7.23.3', '2.16.840.1.114413.1.7.23.3', '2.16.840.1.114413.1.7.23.3', '2.16.840.1.114414.1.7.23.3', '2.16.840.1.114414.1.7.23.3', '2.16.840.1.114414.1.7.23.3', '2.16.840.1.114412.2.1', '1.3.6.1.4.1.8024.0.2.100.1.2', '1.3.6.1.4.1.782.1.2.1.8.1', '2.16.840.1.114028.10.1.2', '1.3.6.1.4.1.4146.1.1', '1.3.6.1.4.1.4146.1.1', '1.3.6.1.4.1.4146.1.1', '2.16.578.1.26.1.3.3', '1.3.6.1.4.1.22234.2.5.2.3.1', '1.3.6.1.4.1.17326.10.14.2.1.2', '1.3.6.1.4.1.17326.10.8.12.1.2', '1.2.276.0.44.1.1.1.4', '1.3.6.1.4.1.34697.2.1', '1.3.6.1.4.1.34697.2.2', '1.3.6.1.4.1.34697.2.3', '1.3.6.1.4.1.34697.2.4', '1.2.616.1.113527.2.5.1.1', '1.3.6.1.4.1.14777.6.1.1', '1.3.6.1.4.1.14777.6.1.2', '1.2.40.0.17.1.22', '0.0.0.0']
+
 
 
 class PluginCertInfo(PluginBase.PluginBase):
@@ -62,6 +76,11 @@ class PluginCertInfo(PluginBase.PluginBase):
              "prints relevant fields of "
              "the certificate. CERTINFO should be 'basic' or 'full'.",
         dest="certinfo")
+    interface.add_option(
+        option="ca_file",
+        help="Local Certificate Authority file (in PEM format), to verify the "
+             "validity of the server(s) certificate(s) against.",
+        dest="ca_file")
 
 
     TRUST_FORMAT = '{store_name} CA Store ({store_version}):'.format
@@ -78,6 +97,9 @@ class PluginCertInfo(PluginBase.PluginBase):
 
         (host, _, _, _) = target
         thread_pool = ThreadPool()
+
+        if 'ca_file' in self._shared_settings and self._shared_settings['ca_file']:
+            AVAILABLE_TRUST_STORES[self._shared_settings['ca_file']] = ('Custom --ca_file', 'N/A')
 
         for (store_path, _) in AVAILABLE_TRUST_STORES.iteritems():
             # Try to connect with each trust store
